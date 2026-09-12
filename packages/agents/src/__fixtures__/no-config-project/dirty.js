@@ -1,0 +1,1 @@
+const someVar = 100;

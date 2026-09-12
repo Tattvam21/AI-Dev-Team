@@ -1,0 +1,162 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum EdgeType {
+  imports
+  calls
+  same_module
+}
+
+enum Severity {
+  critical
+  high
+  medium
+  low
+}
+
+enum ReviewVerdict {
+  pass
+  fail
+  disputed
+}
+
+model Project {
+  id         String    @id @default(uuid())
+  name       String
+  localPath  String?
+  githubRepo String?
+  createdAt  DateTime  @default(now())
+
+  files      File[]
+  tickets    Ticket[]
+
+  @@map("projects")
+}
+
+model File {
+  id             String      @id @default(uuid())
+  projectId      String
+  project        Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  path           String
+  contentHash    String?
+  lastScannedAt  DateTime?
+
+  outgoingEdges  FileEdge[]  @relation("FromEdges")
+  incomingEdges  FileEdge[]  @relation("ToEdges")
+  scanCache      ScanCache?
+  symptomTickets Ticket[]    @relation("SymptomFile")
+  rootCauseTickets Ticket[]  @relation("RootCauseFile")
+
+  @@unique([projectId, path])
+  @@map("files")
+}
+
+model FileEdge {
+  fromFileId String
+  fromFile   File     @relation("FromEdges", fields: [fromFileId], references: [id], onDelete: Cascade)
+  toFileId   String
+  toFile     File     @relation("ToEdges", fields: [toFileId], references: [id], onDelete: Cascade)
+  edgeType   EdgeType
+
+  @@id([fromFileId, toFileId, edgeType])
+  @@map("file_edges")
+}
+
+model ScanCache {
+  fileId           String    @id @unique
+  file             File      @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  contentHash      String
+  dependencyHashes Json
+  cachedTicketIds  String[]
+  lastScannedAt    DateTime? @default(now())
+
+  @@map("scan_cache")
+}
+
+model Ticket {
+  id               String     @id @default(uuid())
+  projectId        String
+  project          Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  symptomFileId    String
+  symptomFile      File       @relation("SymptomFile", fields: [symptomFileId], references: [id], onDelete: Cascade)
+  rootCauseFileId  String?
+  rootCauseFile    File?      @relation("RootCauseFile", fields: [rootCauseFileId], references: [id], onDelete: SetNull)
+  lineStart        Int?
+  lineEnd          Int?
+  title            String
+  description      String     @db.Text
+  severity         Severity
+  confidence       Float
+  status           String     @default("found")
+  retryCount       Int        @default(0)
+  scannerModel     String
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  patches          Patch[]
+  auditLogs        AuditLog[]
+
+  @@map("tickets")
+}
+
+model Patch {
+  id          String    @id @default(uuid())
+  ticketId    String
+  ticket      Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  branchName  String
+  diff        String    @db.Text
+  rationale   String?   @db.Text
+  status      String    @default("awaiting_review")
+  prUrl       String?
+  fixerModel  String
+  createdAt   DateTime  @default(now())
+
+  reviews     Review[]
+  testRuns    TestRun[]
+
+  @@map("patches")
+}
+
+model Review {
+  id            String        @id @default(uuid())
+  patchId       String
+  patch         Patch         @relation(fields: [patchId], references: [id], onDelete: Cascade)
+  verdict       ReviewVerdict
+  notes         String?       @db.Text
+  reviewerModel    String
+  reviewedAt       DateTime      @default(now())
+  council_member   Int?
+  is_final_verdict Boolean       @default(true)
+
+  @@map("reviews")
+}
+
+model TestRun {
+  id         String   @id @default(uuid())
+  patchId    String
+  patch      Patch    @relation(fields: [patchId], references: [id], onDelete: Cascade)
+  passed     Boolean
+  logs       String   @db.Text
+  durationMs Int
+  ranAt      DateTime @default(now())
+
+  @@map("test_runs")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  ticketId  String?
+  ticket    Ticket?  @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  actor     String
+  action    String
+  details   Json
+  createdAt DateTime @default(now())
+
+  @@map("audit_log")
+}

@@ -1,0 +1,22 @@
+{
+  "name": "@ai-dev-team/llm-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "typescript": "^5.7.3",
+    "vitest": "^5.0.0"
+  },
+  "dependencies": {
+    "ollama": "^0.6.3",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.25.2"
+  }
+}

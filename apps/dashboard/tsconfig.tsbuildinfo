@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/api.test.ts","./src/api.ts","./src/main.tsx","./src/types.ts","./src/vite-env.d.ts","./src/components/councildisputemodal.tsx","./src/components/kanbancolumn.tsx","./src/components/ticketcard.tsx"],"version":"5.9.3"}

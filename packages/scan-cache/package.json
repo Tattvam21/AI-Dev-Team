@@ -1,0 +1,21 @@
+{
+  "name": "@ai-dev-team/scan-cache",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "typescript": "^5.7.3",
+    "vitest": "^5.0.0"
+  },
+  "dependencies": {
+    "@ai-dev-team/db": "^0.1.0",
+    "@ai-dev-team/dependency-graph": "^0.1.0"
+  }
+}

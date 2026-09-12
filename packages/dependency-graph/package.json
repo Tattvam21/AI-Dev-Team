@@ -1,0 +1,21 @@
+{
+  "name": "@ai-dev-team/dependency-graph",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.0"
+  },
+  "dependencies": {
+    "@ai-dev-team/db": "^0.1.0",
+    "ignore": "^7.0.9"
+  }
+}

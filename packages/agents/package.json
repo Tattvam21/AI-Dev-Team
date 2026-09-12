@@ -1,0 +1,29 @@
+{
+  "name": "@ai-dev-team/agents",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.2",
+    "@types/node": "^22.20.1",
+    "typescript": "^5.7.3",
+    "vitest": "^5.0.0"
+  },
+  "dependencies": {
+    "@ai-dev-team/db": "^0.1.0",
+    "@ai-dev-team/dependency-graph": "^0.1.0",
+    "@ai-dev-team/llm-gateway": "^0.1.0",
+    "@ai-dev-team/scan-cache": "^0.1.0",
+    "diff": "^9.0.0",
+    "eslint": "^10.10.0",
+    "octokit": "^5.0.5",
+    "simple-git": "^3.36.0",
+    "zod": "^3.25.76"
+  }
+}

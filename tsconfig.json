@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@ai-dev-team/llm-gateway": ["packages/llm-gateway/src"],
+      "@ai-dev-team/llm-gateway/*": ["packages/llm-gateway/src/*"],
+      "@ai-dev-team/agents": ["packages/agents/src"],
+      "@ai-dev-team/agents/*": ["packages/agents/src/*"],
+      "@ai-dev-team/dependency-graph": ["packages/dependency-graph/src"],
+      "@ai-dev-team/dependency-graph/*": ["packages/dependency-graph/src/*"],
+      "@ai-dev-team/scan-cache": ["packages/scan-cache/src"],
+      "@ai-dev-team/scan-cache/*": ["packages/scan-cache/src/*"],
+      "@ai-dev-team/db": ["packages/db/src"],
+      "@ai-dev-team/db/*": ["packages/db/src/*"]
+    }
+  }
+}
