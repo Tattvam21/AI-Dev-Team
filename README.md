@@ -168,4 +168,4 @@ npm run test
 
 ## 📄 License
 
-MIT © [Tattvam21](https://github.com/Tattvam21)
+MIT © 2026 AI Dev Team Authors and Contributors. See [LICENSE](LICENSE) for details.
