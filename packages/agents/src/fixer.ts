@@ -131,6 +131,18 @@ export async function runFixer(
       relatedContext += `\nAdditional Context: ${options.extraContext}`;
     }
 
+    // Recall memory (procedural rules & episodic failures for this file)
+    try {
+      const { MemoryAgent } = await import('./memory-agent.js');
+      const memoryAgent = new MemoryAgent(projectRoot);
+      const memory = await memoryAgent.recall(targetRelPath);
+      if (memory.formattedContext.trim()) {
+        relatedContext += `\n\n${memory.formattedContext}`;
+      }
+    } catch {
+      // Memory recall is non-blocking; proceed if .aidev is absent
+    }
+
     const systemPrompt = loadPrompt('fixer', options.promptVersion ?? 'latest', {
       ticketTitle: ticket.title,
       ticketDescription: ticket.description,

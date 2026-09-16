@@ -115,6 +115,25 @@ export async function runReviewer(
     }
   });
 
+  // Record episode in team memory (.aidev/episodes.jsonl)
+  try {
+    const projectRoot = patch.ticket?.project?.localPath ?? process.cwd();
+    const targetFile = patch.ticket?.rootCauseFile?.path ?? patch.ticket?.symptomFile?.path ?? '';
+    const { MemoryAgent } = await import('./memory-agent.js');
+    const memoryAgent = new MemoryAgent(projectRoot);
+    await memoryAgent.recordEpisode({
+      ticketId: patch.ticket.id,
+      targetFile,
+      title: patch.ticket.title,
+      verdict: llmOutput.verdict as 'pass' | 'fail' | 'disputed',
+      diffSummary: patch.diff ? patch.diff.slice(0, 300) : undefined,
+      rationale: patch.rationale || undefined,
+      reviewerNotes: llmOutput.notes || undefined
+    });
+  } catch {
+    // Memory recording is non-blocking
+  }
+
   return review;
 }
 
@@ -260,6 +279,25 @@ export async function runReviewerCouncil(
       is_final_verdict: true
     }
   });
+
+  // Record episode in team memory (.aidev/episodes.jsonl)
+  try {
+    const projectRoot = patch.ticket?.project?.localPath ?? process.cwd();
+    const targetFile = patch.ticket?.rootCauseFile?.path ?? patch.ticket?.symptomFile?.path ?? '';
+    const { MemoryAgent } = await import('./memory-agent.js');
+    const memoryAgent = new MemoryAgent(projectRoot);
+    await memoryAgent.recordEpisode({
+      ticketId: patch.ticket.id,
+      targetFile,
+      title: patch.ticket.title,
+      verdict: finalVerdict as 'pass' | 'fail' | 'disputed',
+      diffSummary: patch.diff ? patch.diff.slice(0, 300) : undefined,
+      rationale: patch.rationale || undefined,
+      reviewerNotes: summaryNotes
+    });
+  } catch {
+    // Memory recording is non-blocking
+  }
 
   return finalReview;
 }
