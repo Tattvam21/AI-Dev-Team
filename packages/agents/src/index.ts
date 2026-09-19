@@ -8,6 +8,7 @@ export * from './test-writer.js';
 export * from './reviewer.js';
 export * from './git-sync.js';
 export * from './memory-agent.js';
+export * from './teams/index.js';
 export const AGENTS_MODULE = "agents";
 
 export type AgentRole = "scanner" | "triage" | "fixer" | "reviewer" | "test-writer" | "git-sync";

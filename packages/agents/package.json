@@ -20,6 +20,8 @@
     "@ai-dev-team/dependency-graph": "^0.1.0",
     "@ai-dev-team/llm-gateway": "^0.1.0",
     "@ai-dev-team/scan-cache": "^0.1.0",
+    "@langchain/core": "^1.2.11",
+    "@langchain/langgraph": "^1.4.16",
     "diff": "^9.0.0",
     "eslint": "^10.10.0",
     "octokit": "^5.0.5",

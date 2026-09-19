@@ -67,6 +67,12 @@ The **AI Dev Team** behaves like a dedicated software engineering squad:
   - **Episodic Memory (`.aidev/episodes.jsonl`):** Append-only log of past tickets, diffs, test runs, and reviewer critiques.
   - **Targeted Recall:** Fixers automatically query past failures and rejections on target files to prevent repeated mistake loops.
 
+- **Multi-Team Delegation System (`ManagerAgent` & `TeamAgent`):**
+  - **Manager Agent:** Orchestrates work across 3 dedicated teams (`Production`, `Debugging`, `Deployment`).
+  - **Delegation Loop:** Teams receive a task, evaluate available scoped skills, sub-delegate or invoke tools, check completion criteria, and loop until resolved or bounded.
+  - **Skill Registry:** Enforces capability boundaries (e.g. Debugging cannot deploy; Deployment runs Git operations; Production runs sandbox code execution).
+  - **100% Native TypeScript:** Built using `@langchain/langgraph` and `@langchain/core` — zero Python runtime requirements.
+
 - **Human in the Loop:**
   - Two mandatory checkpoints: **Ticket Approval** (prevents wasting compute) and **Diff / PR Approval** (human signs off before code merges).
 
