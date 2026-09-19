@@ -1,80 +1,101 @@
-# AI Dev Team 🤖
+# AI Dev Team
 
-An autonomous, multi-agent software engineering system that scans codebases for defects, deduplicates and prioritizes issues, creates isolated worktrees, generates surgical fixes, runs automated tests, subjects code to multi-model peer review councils, and prepares reviewable GitHub pull requests — with strict human approval gates.
-
----
-
-## 🌟 Overview
-
-The **AI Dev Team** behaves like a dedicated software engineering squad:
-
-```
-                  ┌──────────────────────┐
-                  │    Codebase / Repo   │
-                  └──────────┬───────────┘
-                             │
-                             ▼
-                  ┌──────────────────────┐
-                  │    Scanner Agent     │ (Static analysis + AST Context + LLM)
-                  └──────────┬───────────┘
-                             │
-                             ▼
-                  ┌──────────────────────┐
-                  │     Triage Agent     │ (Deduplication, severity & confidence)
-                  └──────────┬───────────┘
-                             │
-                    [Human Ticket Gate]
-                             │
-                             ▼
-                  ┌──────────────────────┐
-                  │     Fixer Agent      │ (Isolated Git worktree + Memory recall)
-                  └──────────┬───────────┘
-                             │
-                             ▼
-                  ┌──────────────────────┐
-                  │  Test-Writer Agent   │ (Generates & verifies regression tests)
-                  └──────────┬───────────┘
-                             │
-                             ▼
-                  ┌──────────────────────┐
-                  │ Reviewer Agent /     │ (Independent verification or multi-model council)
-                  │ Reviewer Council     │ ──▶ [Records Episode in Memory]
-                  └──────────┬───────────┘
-                             │
-                     [Human PR Gate]
-                             │
-                             ▼
-                  ┌──────────────────────┐
-                  │    Git/Sync Agent    │ (Feature branch, commit & GitHub PR)
-                  └──────────────────────┘
-```
+> **Enterprise-grade, autonomous multi-agent software engineering framework.**  
+> Scans codebases for defects, deduplicates and prioritizes tickets, isolates work in git worktrees, implements surgical fixes with zero-database memory recall, verifies with regression tests, subjects code to peer review councils, and opens GitHub pull requests under strict human approval gates.
 
 ---
 
-## 🚀 Key Features
+## 🏗️ System Architecture & Workflow
 
-- **Multi-Agent Specialization:**
-  - **Scanner:** Combines deterministic static analysis (ESLint, AST parser) with LLM root-cause resolution.
-  - **Triage:** Groups related symptoms and deduplicates tickets pointing to shared root causes.
-  - **Fixer:** Generates surgical diffs in isolated Git worktrees (`fix/ticket-<id>`).
-  - **Test-Writer:** Writes regression tests, confirming they fail before the fix and pass after.
-  - **Reviewer Council:** For high-severity issues, runs multi-model consensus review.
-  - **Git/Sync:** Stages, commits, and opens review-ready GitHub PRs via the GitHub API.
+The platform operates as a coordinated software engineering organization with clear human checkpoints and autonomous worker delegation:
 
-- **Zero-Postgres Git-Native Memory (`MemoryAgent`):**
-  - Works with **zero external database dependencies** using fast, pure Node.js file streaming.
-  - **Procedural Memory (`.aidev/rules.md`):** Human- and agent-curated coding rules, architectural constraints, and standards. Fully Git-versioned and developer-editable.
-  - **Episodic Memory (`.aidev/episodes.jsonl`):** Append-only log of past tickets, diffs, test runs, and reviewer critiques.
-  - **Targeted Recall:** Fixers automatically query past failures and rejections on target files to prevent repeated mistake loops.
+```
+                                  ┌─────────────────────────┐
+                                  │   Target Repository     │
+                                  └────────────┬────────────┘
+                                               │
+                                               ▼
+                                  ┌─────────────────────────┐
+                                  │      Scanner Agent      │ (Static analysis + AST Context + LLM)
+                                  └────────────┬────────────┘
+                                               │
+                                               ▼
+                                  ┌─────────────────────────┐
+                                  │       Triage Agent      │ (Deduplication, severity & confidence)
+                                  └────────────┬────────────┘
+                                               │
+                                      [Human Ticket Gate]
+                                               │
+                                               ▼
+                                  ┌─────────────────────────┐
+                                  │      Manager Agent      │
+                                  └────────────┬────────────┘
+                                               │ Dispatches via Delegation Loop
+                      ┌────────────────────────┼────────────────────────┐
+                      ▼                        ▼                        ▼
+           ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
+           │   Production Team   │  │   Debugging Team    │  │   Deployment Team   │
+           │ (Feature, Fix, Test)│  │(Repro, Trace, Patch)│  │(Branch, CI, Release)│
+           └──────────┬──────────┘  └──────────┬──────────┘  └──────────┬──────────┘
+                      │                        │                        │
+                      └────────────────────────┼────────────────────────┘
+                                               │
+                                               ▼
+                                  ┌─────────────────────────┐
+                                  │    Test-Writer Agent    │ (Generates & verifies regression tests)
+                                  └────────────┬────────────┘
+                                               │
+                                               ▼
+                                  ┌─────────────────────────┐
+                                  │ Reviewer Council Agent  │ (Independent verification & consensus)
+                                  │   (Records Episode)     │ ──▶ [.aidev/episodes.jsonl]
+                                  └────────────┬────────────┘
+                                               │
+                                      [Human PR Gate]
+                                               │
+                                               ▼
+                                  ┌─────────────────────────┐
+                                  │      Git/Sync Agent     │ (Creates branch, commits & opens PR)
+                                  └─────────────────────────┘
+```
 
-- **Multi-Team Delegation System (`ManagerAgent` & `TeamAgent`):**
-  - **Manager Agent:** Orchestrates work across 3 dedicated teams (`Production`, `Debugging`, `Deployment`).
-  - **Delegation Loop:** Teams receive a task, evaluate available scoped skills, sub-delegate or invoke tools, check completion criteria, and loop until resolved or bounded.
-  - **Skill Registry:** Enforces capability boundaries (e.g. Debugging cannot deploy; Deployment runs Git operations; Production runs sandbox code execution).
-  - **100% Native TypeScript:** Built using `@langchain/langgraph` and `@langchain/core` — zero Python runtime requirements.
+---
 
-- **Human in the Loop:**
-  - Two mandatory checkpoints: **Ticket Approval** (prevents wasting compute) and **Diff / PR Approval** (human signs off before code merges).
+## ⚡ Key Capabilities
+
+### 1. Multi-Team Delegation System
+- **Manager Coordination (`ManagerAgent`):** Translates high-level project goals into typed task specifications and delegates across specialized functional teams (`Production`, `Debugging`, `Deployment`).
+- **Bounded Delegation Loop (`TeamAgent`):** Executes task cycles:
+  $$\text{Receive Task} \longrightarrow \text{Decide Action} \longrightarrow \text{Execute Scoped Skill} \longrightarrow \text{Validate} \longrightarrow \text{Loop or Complete}$$
+- **100% Native TypeScript:** Built on top of `@langchain/langgraph` and `@langchain/core` — requiring zero Python dual-runtime setups.
+
+### 2. Zero-Postgres Git-Native Memory (`MemoryAgent`)
+- **No Database Daemon Required:** Operates entirely on pure Node.js streaming file I/O within a version-controlled `.aidev/` directory in the repository root.
+- **Procedural Memory (`.aidev/rules.md`):** Human- and agent-curated coding guidelines and architectural rules automatically injected into prompts.
+- **Episodic Memory (`.aidev/episodes.jsonl`):** Append-only event stream of past ticket attempts, diff rationales, and reviewer critique notes.
+- **Targeted File Recall:** Agents query past failures on target files prior to generating diffs, eliminating repetitive failure loops.
+
+### 3. Comprehensive 12-Skill Catalog (`SkillRegistry`)
+Every agent has role-based permission boundaries strictly enforced:
+
+| Skill | Authorized Teams | Functionality |
+| :--- | :--- | :--- |
+| `code_exec` | Production, Debugging | Safe sandboxed command and code execution |
+| `test_runner` | Production, Debugging | Automated test suite execution (vitest/jest/pytest) |
+| `linter` | Production, Debugging | Static analysis & code style check (ESLint / Ruff) |
+| `git_ops` | Production, Deployment | Git operations: status, diff, local branching, and commit |
+| `log_query` | Debugging | High-speed regex filtering on logs and execution history |
+| `bug_reproduction` | Debugging | Automatic generation of minimal repro scripts |
+| `deploy_api` | Deployment | Target platform deployment trigger (Vercel/Fly.io/Webhook) |
+| `ci_trigger` | Deployment | Dispatches & monitors CI pipeline runs (GitHub Actions) |
+| `infra_provision` | Deployment | Manages environment infrastructure (`docker compose up/down`) |
+| `health_check` | Deployment, Monitor | Service ping, HTTP latency & status code monitor |
+| `memory_recall` | All Teams | Retrieves rules and past episodes for specific files from `.aidev/` |
+| `memory_record` | All Teams | Appends task results & reviewer verdicts to `.aidev/episodes.jsonl` |
+
+### 4. Human-in-the-Loop Safeguards
+- **Gate 1: Ticket Approval:** Humans review and prioritize triaged tickets before fixes are initiated.
+- **Gate 2: Diff / PR Sign-Off:** Humans review code diffs, reviewer council notes, and test coverage before changes are pushed to remote branches.
 
 ---
 
@@ -83,91 +104,108 @@ The **AI Dev Team** behaves like a dedicated software engineering squad:
 ```
 AI-Dev-Team/
 ├── apps/
-│   ├── api/                   # Fastify REST & WebSocket backend
-│   └── dashboard/             # React + Tailwind dashboard for human review
+│   ├── api/                   # Fastify backend (REST & real-time WebSocket)
+│   └── dashboard/             # React + Tailwind review dashboard
 ├── packages/
-│   ├── agents/                # Core agent implementations & MemoryAgent
-│   ├── db/                    # Prisma schema & database utilities
+│   ├── agents/                # Core agents, Team delegation & MemoryAgent
+│   │   └── src/
+│   │       ├── teams/         # Manager, TeamAgent & 12-Skill Registry
+│   │       ├── memory-agent.ts# Zero-database procedural & episodic memory
+│   │       ├── fixer.ts       # Surgical diff generator
+│   │       ├── reviewer.ts    # Single & council peer reviewer
+│   │       └── sandbox.ts     # Sandboxed container executor
+│   ├── db/                    # Prisma client & data models
 │   ├── dependency-graph/      # AST dependency graph parser & traversal
-│   ├── llm-gateway/           # Multi-provider LLM client with structured schemas
+│   ├── llm-gateway/           # Multi-provider LLM client with Zod validation
 │   └── scan-cache/            # Content-hashing & impacted-set calculation
 ├── .aidev/                    # Local/repo agent memory (rules.md, episodes.jsonl)
-├── prompts/                   # Versioned agent prompt templates
-└── docker-compose.yml         # Optional containerized infra (Postgres, Redis)
+├── prompts/                   # Versioned prompt templates
+└── docker-compose.yml         # Containerized infrastructure (optional)
 ```
 
 ---
 
-## ⚡ Quick Start
+## 🚀 Quick Start
 
 ### 1. Prerequisites
 - **Node.js** v20+ (v23+ supported)
 - **npm** v9+
-- **Git** installed on your system
+- **Git**
 
 ### 2. Installation
-
-Clone the repository and install workspace dependencies:
 ```bash
 git clone https://github.com/Tattvam21/AI-Dev-Team.git
 cd AI-Dev-Team
 npm install
 ```
 
-### 3. Environment Setup
-
-Create a `.env` file from `.env.example`:
+### 3. Environment Configuration
 ```bash
 cp .env.example .env
 ```
 
-Configure your LLM keys and optional GitHub integration:
+Set your model configuration in `.env`:
 ```env
+# Cloud providers (Anthropic / OpenAI)
 ANTHROPIC_API_KEY=your-api-key-here
-# Optional model overrides:
-FIXER_MODEL=claude-3-5-sonnet-latest
-REVIEWER_MODEL=claude-3-5-sonnet-latest
+
+# Local Ollama providers (Optional)
+OLLAMA_BASE_URL=http://localhost:11434
+FIXER_MODEL=qwen3-coder:30b
+REVIEWER_MODEL=devstral:24b
+TEAM_MODEL=qwen3-coder:30b
 ```
 
 ---
 
-## 🧠 Using Agent Memory (`.aidev`)
+## 💻 Programmatic Usage
 
-The memory layer automatically activates when agents run on a target repository:
+### Dispatching Tasks via Multi-Team Delegation
+
+```typescript
+import { ManagerAgent, Task } from '@ai-dev-team/agents';
+
+const manager = new ManagerAgent({ projectRoot: process.cwd() });
+
+const task: Task = {
+  taskId: 'task-auth-01',
+  assignedTeam: ManagerAgent.resolveTeam('fix token signature validation error'),
+  taskType: 'bugfix',
+  context: { targetFile: 'src/auth/jwt.ts' },
+  expectedOutput: 'Handle expired token edge cases gracefully',
+  maxIterations: 4,
+  status: 'pending'
+};
+
+const result = await manager.dispatch(task);
+console.log(`Task status: ${result.status}, Iterations: ${result.iterationsUsed}`);
+```
+
+### Interacting with Zero-Postgres Memory
 
 ```typescript
 import { MemoryAgent } from '@ai-dev-team/agents';
 
 const memory = new MemoryAgent(process.cwd());
 
-// Recall rules and past file-specific failures before fixing
-const recall = await memory.recall('src/auth/token.ts');
-console.log(recall.formattedContext);
+// Recall relevant rules and past rejection critiques
+const context = await memory.recall('src/auth/jwt.ts');
+console.log(context.formattedContext);
 
-// Record an episode when review concludes
-await memory.recordEpisode({
-  ticketId: 't-123',
-  targetFile: 'src/auth/token.ts',
-  title: 'Fix token expiry crash',
-  verdict: 'pass',
-  rationale: 'Added RSA verification fallback'
-});
-
-// Add a permanent rule to the repo
-await memory.addRule('Never export JWT secrets directly; use ConfigService', 'Security');
+// Append permanent architectural rules
+await memory.addRule('Always use crypto.randomUUID for nonces', 'Security');
 ```
 
 ---
 
 ## 🧪 Testing
 
-Run automated tests across workspaces:
 ```bash
-# Test agents package
-npm test --workspace=@ai-dev-team/agents
-
-# Run all tests
+# Run tests across workspaces
 npm run test
+
+# Run agents package test suite
+npm test --workspace=@ai-dev-team/agents
 ```
 
 ---
