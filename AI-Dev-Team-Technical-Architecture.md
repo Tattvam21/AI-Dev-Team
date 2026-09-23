@@ -1,347 +1,219 @@
-# AI Dev Team — Technical Architecture & Build Guide
+# AI Dev Team — Technical Architecture & Implementation Guide
 
-A deep technical companion to the project spec: what components exist, what tech powers each one, how data flows end-to-end, the database schema, the API surface, and every feature the system should have.
+> **Enterprise-grade, autonomous multi-agent software engineering framework.**  
+> Built natively in **TypeScript / Node.js** on a local-first, zero-database architecture with tiered memory, two-loop supervisor risk governance, structural AST code summarization, and a 16-skill execution engine.
 
 ---
 
-## 1. System Overview
+## 1. Executive System Overview
 
-The system has five layers:
+The AI Dev Team architecture operates on five decoupled, high-cohesion layers:
 
-1. **Client layer** — a web dashboard (and optionally a CLI) the human uses to trigger scans and approve/reject work.
-2. **API/Orchestrator layer** — a backend service that owns state (the ticket lifecycle) and exposes REST + WebSocket endpoints.
-3. **Job queue layer** — decouples "a ticket needs work" from "an agent is currently doing that work," so agents run asynchronously and can retry/scale independently.
-4. **Agent worker layer** — the actual LLM-powered workers (Scanner, Triage, Fixer, Reviewer, Test-Writer) plus non-LLM workers (Git/Sync).
-5. **Data layer** — a relational database for tickets/patches/reviews, plus a dependency graph and scan cache.
+1. **Client / Dashboard Layer**: React + Tailwind real-time control plane and terminal visualizer for inspecting tickets, patches, and execution telemetry graphs.
+2. **Supervision & Gating Layer**: Two-Loop Supervisor (`ManagerAgent`) providing pre-dispatch risk assessment (Loop 1) and output verification with human-in-the-loop gates (Loop 2).
+3. **Multi-Team Delegation Layer**: Specialized functional teams (`Production`, `Debugging`, `Deployment`) operating bounded delegation loops via LangGraph state machines.
+4. **Skill & Tool Execution Layer**: Comprehensive 16-skill catalog with role-based permission boundaries, risk scoring (0–10), sandbox isolation, and standard tool protocol adapters.
+5. **Tiered Git-Native Memory Layer**: Zero-database persistent memory backed by the `.aidev/` directory with L0 (in-memory hot cache), L1 (procedural rules), and L2 (salience-filtered episodic history).
 
 ```
-┌─────────────┐      REST/WS      ┌──────────────────┐
-│  Dashboard  │◄─────────────────►│   Orchestrator    │
-│  (React)    │                   │   (API + State    │
-└─────────────┘                   │    Machine)       │
-                                   └─────────┬─────────┘
-                                             │ enqueues jobs
-                                   ┌─────────▼─────────┐
-                                   │   Job Queue        │
-                                   │ (Redis + BullMQ/   │
-                                   │  Celery)            │
-                                   └─────────┬─────────┘
-                     ┌───────────────────────┼───────────────────────┐
-             ┌───────▼──────┐        ┌───────▼──────┐        ┌───────▼──────┐
-             │   Scanner    │        │    Fixer     │        │  Git/Sync    │
-             │   Worker     │        │   Worker     │        │   Worker     │
-             └───────┬──────┘        └───────┬──────┘        └───────┬──────┘
-                     │                       │                       │
-             ┌───────▼───────────────────────▼───────┐       ┌───────▼──────┐
-             │           LLM Gateway                  │       │  Git / GitHub │
-             │     (Anthropic API wrapper)            │       │      API      │
-             └─────────────────────────────────────────┘      └──────────────┘
-                     │
-             ┌───────▼───────────────────────────────┐
-             │   Dependency Graph + Scan Cache         │
-             │   (Postgres/SQLite tables)               │
-             └─────────────────────────────────────────┘
-                     │
-             ┌───────▼───────────────────────────────┐
-             │   Tickets / Patches / Reviews DB         │
-             └─────────────────────────────────────────┘
-```
-
----
-
-## 2. Tech Stack (with rationale)
-
-| Layer | Recommended | Why | Alternative |
-|---|---|---|---|
-| Backend language | **Node.js + TypeScript** | Same language as frontend, huge ecosystem for git tooling and GitHub SDKs | Python + FastAPI (better if your static analysis tooling is Python-heavy) |
-| API framework | **Fastify** or Express | Lightweight, fast, good WebSocket support | FastAPI (Python) |
-| Job queue | **BullMQ + Redis** | Battle-tested, retries/backoff/priorities built in | Celery + Redis (Python) |
-| Database | **PostgreSQL** (SQLite for local single-user mode) | Relational data (tickets, patches, graph edges) fits SQL well; JSON columns handle flexible fields | SQLite everywhere for MVP simplicity |
-| ORM | **Prisma** (Node) | Type-safe schema, migrations built in | SQLAlchemy (Python) |
-| LLM | **Anthropic API (Claude)** | Structured output via tool use, strong code reasoning | — |
-| Git (local) | **simple-git** | Thin wrapper over the `git` CLI, reliable | isomorphic-git (pure JS, no CLI dependency) |
-| GitHub API | **Octokit** (`@octokit/rest`) | Official SDK, handles auth/pagination | PyGithub (Python) |
-| Static analysis | **ESLint + Semgrep** (JS/TS), **Ruff + Pylint** (Python) | Deterministic, cheap, catches the "obvious" bugs before burning LLM calls | Language-specific linters as needed |
-| Dependency graph parsing | **TypeScript Compiler API** or `@babel/parser` (JS/TS), Python `ast` module | AST-accurate import resolution, not regex guessing | `madge` / `dependency-cruiser` (JS/TS), `pydeps` (Python) as prebuilt CLI tools |
-| Multi-language parsing (future) | **tree-sitter** | One parsing library, many language grammars — useful once you support multiple stacks | — |
-| File watching | **chokidar** | Reliable cross-platform file-change detection | `watchdog` (Python) |
-| Sandbox/test execution | **Docker** | Full isolation, reproducible environment per project | subprocess + `ulimit`/resource limits (lighter weight, less safe) |
-| Frontend | **React + TypeScript + TailwindCSS** | Fast to build a ticket-queue/dashboard UI | Vue/Svelte if you prefer |
-| Diff viewer | **Monaco Editor** (diff mode) or `react-diff-viewer` | Shows the Fixer's patch in a readable side-by-side view | — |
-| Real-time updates | **WebSocket (Socket.io or native `ws`)** | Push ticket status changes to the dashboard live | Polling (simpler, less real-time) |
-| Auth (GitHub) | **GitHub App** with installation tokens | Scoped, revocable, no personal token floating around | Personal Access Token (simpler for solo MVP use) |
-| Secrets | `.env` locally + OS keychain (`keytar`) | Keeps API keys out of source control and plaintext files | — |
-
----
-
-## 3. Component-by-Component Detail
-
-### 3.1 Orchestrator (the core service)
-- Implements the **ticket state machine**. States: `found → triaged → approved → fixing → in_review → approved_by_reviewer → awaiting_human → pushed → merged` (plus `rejected` and `failed` branches at any stage).
-- A state machine library (e.g. **XState** in Node, or a hand-rolled enum + transition-table in either language) keeps this from turning into scattered `if` statements as you add agents.
-- Every state transition is written to an **audit log** table — this matters both for debugging agent behavior and for the human to trust what happened.
-- Exposes:
-  - REST endpoints for CRUD on projects/tickets/patches (see §6).
-  - A WebSocket channel that pushes ticket-state-change events to the dashboard in real time.
-
-### 3.2 Job Queue
-- Every agent invocation is a **job**, not a direct function call — this is what lets you retry a failed Fixer run, rate-limit LLM calls, and run multiple agents concurrently without them stepping on each other.
-- Queue design: one queue per agent type (`scanner-queue`, `fixer-queue`, `reviewer-queue`, `git-queue`) so you can control concurrency per stage independently (e.g. only 1 Git/Sync job at a time to avoid branch conflicts, but 5 Scanner jobs in parallel).
-- Jobs carry a `ticket_id` and enough context to be re-run idempotently.
-
-### 3.3 LLM Gateway
-A thin internal service every agent calls through — don't let agents call the Anthropic API directly. It centralizes:
-- **Prompt templates**, versioned per agent role (stored as files, e.g. `prompts/scanner.md`, `prompts/fixer.md`) so you can iterate on prompts without redeploying agent logic.
-- **Structured output enforcement** — use Claude's tool-use/function-calling to force each agent's response into a JSON schema (ticket, patch, review) instead of parsing freeform text. This is the single biggest reliability lever you have.
-- **Retry/backoff** on rate limits or transient errors.
-- **Context budgeting** — decides how much code/context to include per call (this is where the dependency graph earns its keep: only include the flagged file + its 1-hop neighbors, not the whole repo).
-- **Cost/token logging** per ticket, so you can see which tickets are expensive to process.
-
-### 3.4 Dependency Graph Engine
-- Parses each file's imports using a real AST parser (TypeScript Compiler API, Babel, or Python's `ast` module) — regex-based import detection breaks on edge cases (dynamic imports, aliased paths, re-exports).
-- Produces a directed graph: `file_edges(from_file, to_file, edge_type)` where `edge_type` is `imports`, `calls`, or `same_module`.
-- Rebuilt incrementally: file-watcher detects a change → re-parse only that file's edges → update the graph, not the whole thing.
-- Exposes a simple traversal API internally: `getNeighbors(file, hops=1)` used by both the Scanner (root-cause context) and the Scan Cache (impacted-set calculation).
-
-### 3.5 Scan Cache Engine
-- SHA-256 content hash per file, stored with the last scan's results.
-- On each scan run: compute current hashes → diff against stored hashes → any changed file, plus anything reachable from it in the dependency graph, becomes the **impacted set**.
-- Only the impacted set goes through static analysis + LLM review; everything else reuses cached ticket results.
-- This is what makes file-save-triggered local scanning fast enough to be usable continuously rather than run-on-demand only.
-
-### 3.6 Agent Workers (general pattern)
-Every agent worker follows the same shape:
-1. Pull a job off its queue.
-2. Fetch relevant context from the DB (ticket, file contents, dependency graph neighbors).
-3. Build a prompt from its template + context.
-4. Call the LLM Gateway, requesting structured output.
-5. **Validate** the response against a schema (Zod in TypeScript, Pydantic in Python) — reject and retry once if the LLM returns malformed output.
-6. Write the result to the DB.
-7. Emit an event so the Orchestrator advances the ticket's state.
-
-### 3.7 Git/Sync Worker (no LLM for the mechanical parts)
-- Local: `simple-git` creates an isolated **git worktree** per ticket (not just a branch — a worktree gives the Fixer a fully separate working directory, so it can't accidentally touch files the human is currently editing).
-- Commits with an LLM-generated message (short call to the LLM Gateway, cheap).
-- Remote: pushes the branch, then calls the **GitHub REST API** (via Octokit) to open a PR with an LLM-written description (ticket summary + what changed + tests added).
-- Before pushing: fetches latest `main`/`origin` and checks for conflicts; on conflict, flags the ticket as `failed` with a note rather than force-pushing.
-
-### 3.8 Sandbox / Execution Engine
-- Runs the project's test suite inside a **Docker container** built from the project's own dependency manifest (detects `package.json` → Node image, `requirements.txt`/`pyproject.toml` → Python image).
-- Enforces a timeout and memory/CPU limits so a runaway test (or an infinite loop the Fixer accidentally introduced) can't hang the pipeline.
-- Captures stdout/stderr and exit code, returns structured pass/fail + logs to the Fixer and Reviewer agents.
-- For a lighter-weight MVP: a subprocess with `ulimit`/resource constraints instead of full Docker — faster to build, less isolation.
-
-### 3.9 Dashboard (frontend)
-- **Ticket queue view**: kanban-style columns (Found → Triaged → In Progress → Awaiting Approval → Done), updated live via WebSocket.
-- **Diff viewer**: Monaco Editor's diff mode (same engine VS Code uses) to show the Fixer's patch clearly, with syntax highlighting.
-- **Approve/Reject controls** at both checkpoints (ticket approval, final patch approval), calling the REST API.
-- **Audit trail view**: per-ticket timeline of every agent action, useful for trust and debugging.
-
----
-
-## 4. Database Schema (PostgreSQL/SQLite)
-
-```sql
-CREATE TABLE projects (
-  id            UUID PRIMARY KEY,
-  name          TEXT NOT NULL,
-  local_path    TEXT,
-  github_repo   TEXT,          -- e.g. "owner/repo", null for local-only
-  created_at    TIMESTAMP DEFAULT now()
-);
-
-CREATE TABLE files (
-  id            UUID PRIMARY KEY,
-  project_id    UUID REFERENCES projects(id),
-  path          TEXT NOT NULL,
-  content_hash  TEXT,
-  last_scanned_at TIMESTAMP
-);
-
-CREATE TABLE file_edges (
-  from_file_id  UUID REFERENCES files(id),
-  to_file_id    UUID REFERENCES files(id),
-  edge_type     TEXT CHECK (edge_type IN ('imports','calls','same_module')),
-  PRIMARY KEY (from_file_id, to_file_id, edge_type)
-);
-
-CREATE TABLE scan_cache (
-  file_id           UUID REFERENCES files(id) PRIMARY KEY,
-  content_hash      TEXT NOT NULL,
-  dependency_hashes JSONB,        -- { "other_file_id": "hash" }
-  cached_ticket_ids UUID[],
-  last_scanned_at   TIMESTAMP
-);
-
-CREATE TABLE tickets (
-  id              UUID PRIMARY KEY,
-  project_id      UUID REFERENCES projects(id),
-  symptom_file_id UUID REFERENCES files(id),
-  root_cause_file_id UUID REFERENCES files(id),  -- nullable, set if different from symptom
-  line_start      INT,
-  line_end        INT,
-  title           TEXT NOT NULL,
-  description     TEXT NOT NULL,
-  severity        TEXT CHECK (severity IN ('critical','high','medium','low')),
-  confidence      FLOAT,
-  status          TEXT NOT NULL DEFAULT 'found',
-  created_at      TIMESTAMP DEFAULT now(),
-  updated_at      TIMESTAMP DEFAULT now()
-);
-
-CREATE TABLE patches (
-  id              UUID PRIMARY KEY,
-  ticket_id       UUID REFERENCES tickets(id),
-  branch_name     TEXT NOT NULL,
-  diff            TEXT NOT NULL,
-  rationale       TEXT,
-  status          TEXT NOT NULL DEFAULT 'awaiting_review',
-  created_at      TIMESTAMP DEFAULT now()
-);
-
-CREATE TABLE reviews (
-  id              UUID PRIMARY KEY,
-  patch_id        UUID REFERENCES patches(id),
-  verdict         TEXT CHECK (verdict IN ('pass','fail')),
-  notes           TEXT,
-  reviewed_at     TIMESTAMP DEFAULT now()
-);
-
-CREATE TABLE test_runs (
-  id              UUID PRIMARY KEY,
-  patch_id        UUID REFERENCES patches(id),
-  passed          BOOLEAN,
-  logs            TEXT,
-  duration_ms     INT,
-  ran_at          TIMESTAMP DEFAULT now()
-);
-
-CREATE TABLE audit_log (
-  id              UUID PRIMARY KEY,
-  ticket_id       UUID REFERENCES tickets(id),
-  actor           TEXT NOT NULL,      -- 'scanner' | 'fixer' | 'human' | etc.
-  action          TEXT NOT NULL,      -- 'created' | 'approved' | 'rejected' | 'state_change'
-  details         JSONB,
-  created_at      TIMESTAMP DEFAULT now()
-);
+                                  ┌───────────────────────────┐
+                                  │    Target Codebase/Repo   │
+                                  └─────────────┬─────────────┘
+                                                │
+                                                ▼
+                                  ┌───────────────────────────┐
+                                  │       Scanner Agent       │ (AST + Static Analysis + LLM)
+                                  └─────────────┬─────────────┘
+                                                │
+                                                ▼
+                                  ┌───────────────────────────┐
+                                  │       Triage Agent        │ (Deduplication, severity ranking)
+                                  └─────────────┬─────────────┘
+                                                │
+                                      [Human Ticket Gate]
+                                                │
+                                                ▼
+                        ┌───────────────────────────────────────────────┐
+                        │      Manager Agent (Two-Loop Supervisor)      │
+                        │ ┌───────────────────────────────────────────┐ │
+                        │ │ Loop 1: Planning & Risk Assessment (0-10) │ │
+                        │ └───────────────────────────────────────────┘ │
+                        └───────────────────────┬───────────────────────┘
+                                                │ Dispatches via Delegation Loops
+                      ┌─────────────────────────┼─────────────────────────┐
+                      ▼                         ▼                         ▼
+           ┌─────────────────────┐   ┌─────────────────────┐   ┌─────────────────────┐
+           │   Production Team   │   │   Debugging Team    │   │   Deployment Team   │
+           │ (Feature, Fix, Test)│   │(Repro, Trace, Patch)│   │(Branch, CI, Release)│
+           └──────────┬──────────┘   └──────────┬──────────┘   └──────────┬──────────┘
+                      │                         │                         │
+                      └─────────────────────────┼─────────────────────────┘
+                                                │
+                                                ▼
+                        ┌───────────────────────────────────────────────┐
+                        │              16-Skill Catalog                 │
+                        │ (Sandbox, AST Outlines, Security, Git Ops,    │
+                        │  Diagram Gen, Doc Search, Universal Adapter)  │
+                        └───────────────────────┬───────────────────────┘
+                                                │
+                                                ▼
+                        ┌───────────────────────────────────────────────┐
+                        │            Verification Pipeline              │
+                        │  - Test Suite Runner (vitest/jest/pytest)     │
+                        │  - Static Analysis & Linter (ESLint/Ruff)     │
+                        │  - Security & Secrets Scanner (OWASP/CWE)     │
+                        └───────────────────────┬───────────────────────┘
+                                                │
+                                                ▼
+                        ┌───────────────────────────────────────────────┐
+                        │           Reviewer Council Agent              │
+                        │ (Multi-reviewer consensus + salience filter)  │
+                        └───────────────────────┬───────────────────────┘
+                                                │
+                                       [Human PR Gate]
+                                                │
+                                                ▼
+                        ┌───────────────────────────────────────────────┐
+                        │         Git/Sync & Release Agent              │
+                        │ (Atomic branch, commit, PR & deployment)      │
+                        └───────────────────────┬───────────────────────┘
+                                                │
+                                                ▼
+                        ┌───────────────────────────────────────────────┐
+                        │        Zero-Postgres Tiered Memory            │
+                        │  - L0: In-Memory Hot Cache (TTL: 60s)         │
+                        │  - L1: Procedural Rules (.aidev/rules.md)     │
+                        │  - L2: Episodic Log (.aidev/episodes.jsonl)   │
+                        └───────────────────────────────────────────────┘
 ```
 
 ---
 
-## 5. API Design (REST + WebSocket)
+## 2. Technology Stack & Design Decisions
 
-| Method | Endpoint | Purpose |
+| Subsystem | Technology Choice | Architectural Rationale |
 |---|---|---|
-| `POST` | `/projects` | Register a new project (local path or GitHub repo) |
-| `POST` | `/projects/:id/scan` | Trigger a scan (full or incremental) |
-| `GET` | `/projects/:id/tickets` | List tickets, filterable by status/severity |
-| `GET` | `/tickets/:id` | Ticket detail, including root-cause file if set |
-| `POST` | `/tickets/:id/approve` | Human approves a ticket → enqueues Fixer job |
-| `POST` | `/tickets/:id/reject` | Human rejects a ticket → closes it |
-| `GET` | `/tickets/:id/patch` | Get the current patch/diff for a ticket |
-| `POST` | `/patches/:id/approve` | Human approves the diff → enqueues Git/Sync job |
-| `POST` | `/patches/:id/reject` | Sends ticket back to Fixer with human notes |
-| `GET` | `/tickets/:id/audit` | Full timeline of agent actions on this ticket |
-| `WS` | `/ws/projects/:id` | Live ticket state updates for the dashboard |
-
-Auth: a simple API key/session for the dashboard-to-backend calls; a separate GitHub App installation token for backend-to-GitHub calls (never expose the GitHub token to the frontend).
+| **Runtime** | **Node.js (ESM) + TypeScript** | Unified language across agents, tools, frontend, and build scripts. Single-runtime simplicity without dual Python interop. |
+| **Agent Orchestration** | **LangGraph (`@langchain/langgraph`)** | Explicit state machines with bounded loop guarantees, conditional routing, and deterministic sub-delegation. |
+| **Local LLM Engine** | **Ollama** (`qwen3-coder:30b`, `devstral:24b`) | Complete data privacy, zero API costs, high code reasoning throughput, and native local offline execution. |
+| **Structured Output** | **Zod Schema Enforcers + LLM Gateway** | Converts Zod schemas into JSON specifications, guaranteeing validated typed outputs with automated retries. |
+| **Memory Engine** | **Git-Native Flat Files (`.aidev/`)** | Zero database installation. Version-controllable, human-editable rules and append-only streaming JSONL episodes. |
+| **Context Optimizer** | **Structural AST Outline Extractor** | Parses types, interfaces, and function signatures without full method bodies, saving up to 80% context tokens. |
+| **Isolation Sandbox** | **Docker Containers / Temp Worktrees** | Isolates arbitrary code execution and test execution from host filesystem and host dependencies. |
+| **Safety Governance** | **Two-Loop Supervisor + Risk Gate** | Real-time action risk scoring (0–10) preventing destructive or high-risk state changes without verification. |
 
 ---
 
-## 6. End-to-End Working (concrete walkthrough)
+## 3. Core Engine Subsystems
 
-1. **Trigger**: User clicks "Scan" in the dashboard, or saves a file locally (chokidar fires a change event).
-2. **Impacted-set calculation**: Scan Cache Engine hashes changed files, walks the dependency graph to find dependents, builds the impacted set.
-3. **Static pass**: ESLint/Semgrep (or language equivalent) run against the impacted set — fast, deterministic findings go straight into tickets.
-4. **LLM pass**: For files still ambiguous after static analysis, the Scanner worker pulls the file + its 1-hop dependency-graph neighbors, sends it to the LLM Gateway with the Scanner prompt template, and gets back structured findings (with `root_cause_file` if different from the symptom file).
-5. **Ticket creation**: Findings are written to the `tickets` table, status `found`.
-6. **Triage**: A Triage job dedupes/scores tickets, updates `severity`/`confidence`, status → `triaged`. Dashboard shows the queue live via WebSocket.
-7. **Human approval #1**: User reviews the ticket queue, clicks Approve on a ticket. Status → `approved`, a Fixer job is enqueued.
-8. **Fix**: Fixer worker creates an isolated git worktree, generates a diff via the LLM Gateway, writes it to the `patches` table. Test-Writer worker (separate job) adds/updates tests in the same worktree.
-9. **Sandbox test run**: The Sandbox Engine runs the test suite in a container against the worktree; results go to `test_runs`.
-10. **Review**: Reviewer worker checks the diff + test results independently, writes a verdict to `reviews`. On `fail`, ticket loops back to step 8 (capped retries) with the Reviewer's notes as extra context.
-11. **Human approval #2**: On `pass`, the patch surfaces in the dashboard's diff viewer. User approves.
-12. **Ship**: Git/Sync worker commits, pushes the branch, opens a GitHub PR with an LLM-written description. Ticket status → `pushed`.
-13. **Merge**: Human merges the PR on GitHub through normal review (outside the tool). Optionally, a GitHub webhook flips the ticket to `merged` when that happens.
+### 3.1 Tiered Context Engine (`MemoryAgent`)
+Memory operates across three latency and scope tiers:
+- **Tier L0 (Hot Session Cache):** In-memory map of recent target file queries. Instant resolution with a 60-second TTL.
+- **Tier L1 (Procedural Rules):** Persistent guidelines located in `.aidev/rules.md`. Injected into prompt headers across all agent turns.
+- **Tier L2 (Episodic Stream):** Append-only event store in `.aidev/episodes.jsonl`. Matched against the active target file to retrieve previous rejection rationales and avoid duplicate regression attempts.
+- **Salience Scoring Filter:** Calculates an informational value score ($0.0 \le S \le 1.0$) based on presence of failure rationales, reviewer notes, and diff summaries. Events with $S < 0.5$ are dropped to keep context clean.
 
----
+### 3.2 Structural Code AST Outline Extractor (`extractCodeOutline`)
+- Generates high-level structural blueprints of source files:
+  - Exported interfaces and types
+  - Class definitions and method declarations
+  - Standalone and arrow functions
+  - Top-level imports and exports
+- Injected alongside L1/L2 memory to give agents complete API awareness without bloating context windows.
 
-## 7. Full Feature List
-
-**Core (MVP)**
-- Local project scanning (on-demand + file-watcher triggered)
-- Static analysis integration (ESLint/Semgrep or language equivalent)
-- LLM-based deeper bug detection for logic-level issues
-- Ticket queue UI with approve/reject
-- Fixer-generated diffs, shown to human before any git action
-- Manual patch application (copy diff, no auto-git yet)
-
-**Phase 2+**
-- Dependency graph-based root-cause tracing (`root_cause_file` vs `symptom_file`)
-- Scan memory / incremental scanning via content-hash caching
-- Automated git branch/commit/local push
-- Reviewer/Critic second-opinion agent before human sees the diff
-- Test-Writer agent (auto-generates regression tests)
-- Sandboxed test execution (Docker)
-
-**Phase 3+**
-- GitHub App auth + remote repo support
-- Auto branch push + PR creation with LLM-written description
-- Webhook-triggered scans on push/PR
-- Audit log / full action history per ticket
-
-**Phase 4+ (scale-out)**
-- Additional agent types: security scanner, performance scanner, dependency-upgrade agent
-- Multi-project/multi-repo dashboard
-- Auto-approve rules for high-confidence, low-risk fixes (e.g. lint-only changes)
-- Cost/token usage dashboard per project
-- Multi-language support via tree-sitter-based parsing
+### 3.3 Two-Loop Supervisor & Risk Gatekeeper (`ManagerAgent`)
+- **Loop 1: Planning & Risk Assessment**
+  - Scores task risk ($0 \le R \le 10$) based on operation type, target files, and environment sensitivity.
+  - Classifies tasks into `low`, `medium`, or `high` risk.
+  - High-risk operations (e.g. deployments, branch pushes, infrastructure changes) require explicit approval or verification pass gates.
+- **Loop 2: Execution & Output Verification**
+  - Manages delegation cycles with team agents.
+  - Records salience-scored episodes upon task completion or failure.
 
 ---
 
-## 8. Security & Safety Considerations
+## 4. Comprehensive 16-Skill Execution Catalog
 
-- **No agent ever merges or force-pushes** — every write to `main`/remote requires explicit human approval at the patch-approval checkpoint.
-- **Sandboxed execution** — Fixer's code never runs against the user's live working directory; it's always an isolated worktree/container.
-- **Scoped GitHub auth** — prefer a GitHub App with minimal repo permissions (contents + pull-requests) over a broad personal access token.
-- **Secrets never touch the LLM context** — strip `.env` files, API keys, and credentials from anything sent to the LLM Gateway; a simple denylist on file patterns (`.env`, `*.pem`, `secrets/*`) before context assembly.
-- **Audit log is append-only** — every agent action and human decision is recorded, so any fix that reaches production is traceable back to the ticket, the diff, the reviewer verdict, and who approved it.
-- **Rate/cost limits** — cap LLM calls per project per hour to avoid runaway spend from a misbehaving file-watcher loop.
+| # | Skill Name | Authorized Teams | Risk (0-10) | Description |
+|---|---|---|---|---|
+| 1 | `memory_recall` | All Teams | Low (0) | Recalls L0/L1/L2 memory + AST code outlines from `.aidev/` |
+| 2 | `memory_record` | All Teams | Low (1) | Records salience-filtered episodes to `.aidev/episodes.jsonl` |
+| 3 | `code_exec` | Production, Debugging | Medium (5) | Executes code or commands inside isolated sandbox |
+| 4 | `test_runner` | Production, Debugging | Medium (4) | Runs test suite (vitest/jest/pytest) and captures outputs |
+| 5 | `linter` | Production, Debugging | Low (1) | Executes static analysis & lint checks (ESLint/Ruff) |
+| 6 | `git_ops` | Production, Deployment | High (8) | Performs git status, diff, local branch, and atomic commits |
+| 7 | `log_query` | Debugging | Low (0) | High-speed regex filtering on logs and execution traces |
+| 8 | `bug_reproduction` | Debugging | Medium (4) | Constructs minimal reproduction test scripts and asserts failure |
+| 9 | `deploy_api` | Deployment | High (9) | Dispatches deployment payloads to staging/production webhooks |
+| 10 | `ci_trigger` | Deployment | High (8) | Dispatches and monitors CI workflow runs (GitHub Actions) |
+| 11 | `infra_provision` | Deployment | High (9) | Manages container environments (`docker compose up/down`) |
+| 12 | `health_check` | Deployment, Monitor | Low (0) | Pings endpoints and measures HTTP latency and status codes |
+| 13 | `security_scan` | Production, Debugging | Medium (3) | Scans workspace for leaked secrets and unsafe code patterns |
+| 14 | `diagram_gen` | Production | Low (2) | Generates SVG & Mermaid architecture diagrams in `docs/architecture/` |
+| 15 | `doc_search` | Production, Debugging | Low (0) | Fetches package registry metadata and documentation specs |
+| 16 | `universal_tool_adapter` | All Teams | Medium (5) | Dynamically executes standard JSON-schema tool definitions |
 
 ---
 
-## 9. Suggested Repo Structure
+## 5. Autonomous Workflows & Execution Pipelines
+
+### 5.1 Autonomous Issue Resolver Pipeline (`IssueResolverPipeline`)
+1. **Intake**: Ingests issue metadata (ID, title, description, target files, labels).
+2. **Triage & Context Extraction**: Classifies issue intent, queries L1/L2 memory, and extracts AST code outlines.
+3. **Delegation**: Manager assigns task to the appropriate team (`Production` or `Debugging`).
+4. **Execution Loop**: Team agent executes iterative skill calls (`memory_recall` $\rightarrow$ patch generation $\rightarrow$ `test_runner`).
+5. **Multi-Gate Verification**:
+   - `test_runner`: Unit & regression test pass.
+   - `linter`: Static analysis and style verification.
+   - `security_scan`: Zero critical/high secrets or vulnerabilities.
+6. **Telemetry & Memory Sync**: Emits execution graph telemetry and saves salience-filtered episode to `.aidev/`.
+
+### 5.2 Real-Time Execution Telemetry (`TelemetryVisualizer`)
+- Records node states (`pending`, `running`, `completed`, `failed`), execution timestamps, and transition edges.
+- Exports structured snapshots for the React dashboard and renders terminal ASCII workflow trees.
+
+---
+
+## 6. Directory Structure & Layout
 
 ```
-ai-dev-team/
-├── apps/
-│   ├── dashboard/          # React frontend
-│   └── api/                # Orchestrator (Fastify/Express)
+AI-Dev-Team/
+├── .aidev/                                # Git-native memory store
+│   ├── rules.md                          # L1 procedural rules
+│   └── episodes.jsonl                    # L2 episodic failure/success log
+├── docs/
+│   └── architecture/                     # Auto-generated SVG/Mermaid diagrams
+│       ├── system_architecture.mmd
+│       └── system_architecture.svg
 ├── packages/
-│   ├── agents/
-│   │   ├── scanner/
-│   │   ├── triage/
-│   │   ├── fixer/
-│   │   ├── reviewer/
-│   │   ├── test-writer/
-│   │   └── git-sync/
-│   ├── llm-gateway/        # Anthropic API wrapper, prompt templates
-│   ├── dependency-graph/   # AST parsing + graph traversal
-│   ├── scan-cache/         # hashing + impacted-set logic
-│   └── db/                 # Prisma schema + migrations
-├── prompts/                # versioned prompt templates per agent
-├── docker/                 # sandbox container definitions
-└── docker-compose.yml      # local dev: postgres, redis, api, dashboard
+│   ├── agents/                           # Multi-agent orchestrators & skills
+│   │   └── src/
+│   │       ├── memory/                   # Tiered memory & AST outline engine
+│   │       │   └── code-ast-outline.ts
+│   │       ├── security/                 # Static vulnerability & secret scanner
+│   │       │   └── security-scanner.ts
+│   │       ├── visual/                   # Editorial SVG/Mermaid diagram generator
+│   │       │   └── diagram-generator.ts
+│   │       ├── tools/                    # Tool protocol adapters & doc search
+│   │       │   ├── doc-search-client.ts
+│   │       │   └── tool-protocol-adapter.ts
+│   │       ├── teams/                    # LangGraph multi-team delegation system
+│   │       │   ├── manager-agent.ts
+│   │       │   ├── team-agent.ts
+│   │       │   ├── skill-registry.ts
+│   │       │   └── task-schemas.ts
+│   │       ├── workflows/                # Autonomous issue resolution & telemetry
+│   │       │   ├── issue-resolver-pipeline.ts
+│   │       │   └── telemetry-visualizer.ts
+│   │       ├── fixer.ts
+│   │       ├── reviewer.ts
+│   │       ├── scanner.ts
+│   │       ├── triage.ts
+│   │       ├── sandbox.ts
+│   │       └── index.ts
+│   ├── llm-gateway/                      # Ollama client with Zod structured output
+│   └── db/                               # Database schemas & client
+├── prompts/                              # Versioned markdown prompts
+├── README.md                             # Project overview & quick start
+└── LICENSE                               # MIT License
 ```
-
----
-
-## 10. Local Dev Setup (order of operations)
-
-1. `docker-compose up` for Postgres + Redis.
-2. Run Prisma (or Alembic) migrations to create the schema in §4.
-3. Start the API/Orchestrator service.
-4. Start one worker process per agent queue (can run in the same process for MVP, split later for scale).
-5. Start the dashboard, point it at the API's REST + WebSocket URLs.
-6. Register a project (local path) via the dashboard or a `POST /projects` call.
-7. Trigger a scan and watch tickets populate in real time.

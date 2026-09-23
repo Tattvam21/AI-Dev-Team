@@ -1,0 +1,20 @@
+flowchart TD
+  scanner[/"Scanner Agent"/]
+  triage[/"Triage Agent"/]
+  manager[/"Two-Loop Manager"/]
+  prod{{Production Team}}
+  debug{{Debugging Team}}
+  deploy{{Deployment Team}}
+  skills["16-Skill Catalog"]
+  verify["Verification Gates"]
+  memory[(Tiered Memory (.aidev))]
+  scanner -->|defects| triage
+  triage -->|approved_ticket| manager
+  manager -->|delegate| prod
+  manager -->|delegate| debug
+  manager -->|delegate| deploy
+  prod -->|executes| skills
+  debug -->|executes| skills
+  deploy -->|executes| skills
+  skills -->|validate| verify
+  verify -->|records_episode| memory
