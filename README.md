@@ -24,11 +24,11 @@ The platform operates as a coordinated software engineering organization with cl
                                   │       Triage Agent      │ (Deduplication, severity & confidence)
                                   └────────────┬────────────┘
                                                │
-                                      [Human Ticket Gate]
+                                       [Human Ticket Gate]
                                                │
                                                ▼
                                   ┌─────────────────────────┐
-                                  │      Manager Agent      │
+                                  │      Manager Agent      │ (Two-Loop Supervisor + Risk Gatekeeper)
                                   └────────────┬────────────┘
                                                │ Dispatches via Delegation Loop
                       ┌────────────────────────┼────────────────────────┐
@@ -47,11 +47,11 @@ The platform operates as a coordinated software engineering organization with cl
                                                │
                                                ▼
                                   ┌─────────────────────────┐
-                                  │ Reviewer Council Agent  │ (Independent verification & consensus)
+                                  │ Reviewer Council Agent  │ (Consensus + Salience-filtered logging)
                                   │   (Records Episode)     │ ──▶ [.aidev/episodes.jsonl]
                                   └────────────┬────────────┘
                                                │
-                                      [Human PR Gate]
+                                       [Human PR Gate]
                                                │
                                                ▼
                                   ┌─────────────────────────┐
@@ -63,153 +63,130 @@ The platform operates as a coordinated software engineering organization with cl
 
 ## ⚡ Key Capabilities
 
-### 1. Multi-Team Delegation System
-- **Manager Coordination (`ManagerAgent`):** Translates high-level project goals into typed task specifications and delegates across specialized functional teams (`Production`, `Debugging`, `Deployment`).
-- **Bounded Delegation Loop (`TeamAgent`):** Executes task cycles:
-  $$\text{Receive Task} \longrightarrow \text{Decide Action} \longrightarrow \text{Execute Scoped Skill} \longrightarrow \text{Validate} \longrightarrow \text{Loop or Complete}$$
+### 1. Two-Loop Supervisor & Multi-Team Delegation
+- **Two-Loop Supervisor (`ManagerAgent`):**
+  - **Loop 1 (Planning & Risk Gate):** Evaluates task intent and assigns risk ratings (0–10). High-risk operations (deployments, destructive actions) trigger validation gates.
+  - **Loop 2 (Execution & Verification):** Coordinates specialized teams (`Production`, `Debugging`, `Deployment`) through bounded delegation loops:
+    $$\text{Receive Task} \longrightarrow \text{Decide Action} \longrightarrow \text{Execute Scoped Skill} \longrightarrow \text{Validate} \longrightarrow \text{Loop or Complete}$$
 - **100% Native TypeScript:** Built on top of `@langchain/langgraph` and `@langchain/core` — requiring zero Python dual-runtime setups.
 
-### 2. Zero-Postgres Git-Native Memory (`MemoryAgent`)
+### 2. Tiered Zero-Postgres Memory (`MemoryAgent`)
 - **No Database Daemon Required:** Operates entirely on pure Node.js streaming file I/O within a version-controlled `.aidev/` directory in the repository root.
-- **Procedural Memory (`.aidev/rules.md`):** Human- and agent-curated coding guidelines and architectural rules automatically injected into prompts.
-- **Episodic Memory (`.aidev/episodes.jsonl`):** Append-only event stream of past ticket attempts, diff rationales, and reviewer critique notes.
-- **Targeted File Recall:** Agents query past failures on target files prior to generating diffs, eliminating repetitive failure loops.
+- **3-Tier Context Hierarchy:**
+  - **L0 (In-Memory Hot Cache):** Instant sub-millisecond retrieval of recent queries within the active execution session.
+  - **L1 (Procedural Rules):** Reads `.aidev/rules.md` for active coding guidelines and architectural constraints.
+  - **L2 (Lazy-Streamed Episodic History):** Append-only stream in `.aidev/episodes.jsonl` containing past failure notes and patch rationales.
+- **Salience-Driven Episode Filtering:** Intelligently evaluates new records to filter out low-signal noise and prevent duplicate failure logs.
+- **Structural Code AST Outline Extractor:** Generates concise structural signatures (types, interfaces, class methods, exports) to supply rich context while minimizing token consumption.
 
-### 3. Comprehensive 12-Skill Catalog (`SkillRegistry`)
-Every agent has role-based permission boundaries strictly enforced:
+### 3. Comprehensive 16-Skill Catalog (`SkillRegistry`)
+Every agent has role-based permission boundaries and risk scores strictly enforced:
 
-| Skill | Authorized Teams | Functionality |
-| :--- | :--- | :--- |
-| `code_exec` | Production, Debugging | Safe sandboxed command and code execution |
-| `test_runner` | Production, Debugging | Automated test suite execution (vitest/jest/pytest) |
-| `linter` | Production, Debugging | Static analysis & code style check (ESLint / Ruff) |
-| `git_ops` | Production, Deployment | Git operations: status, diff, local branching, and commit |
-| `log_query` | Debugging | High-speed regex filtering on logs and execution history |
-| `bug_reproduction` | Debugging | Automatic generation of minimal repro scripts |
-| `deploy_api` | Deployment | Target platform deployment trigger (Vercel/Fly.io/Webhook) |
-| `ci_trigger` | Deployment | Dispatches & monitors CI pipeline runs (GitHub Actions) |
-| `infra_provision` | Deployment | Manages environment infrastructure (`docker compose up/down`) |
-| `health_check` | Deployment, Monitor | Service ping, HTTP latency & status code monitor |
-| `memory_recall` | All Teams | Retrieves rules and past episodes for specific files from `.aidev/` |
-| `memory_record` | All Teams | Appends task results & reviewer verdicts to `.aidev/episodes.jsonl` |
+| # | Skill | Authorized Teams | Risk Level | Functionality |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | `memory_recall` | All Teams | Low (0) | Tiered L0/L1/L2 recall + AST code outlines from `.aidev/` |
+| 2 | `memory_record` | All Teams | Low (1) | Salience-filtered episodic logging to `.aidev/episodes.jsonl` |
+| 3 | `code_exec` | Production, Debugging | Medium (5) | Safe sandboxed command and code execution |
+| 4 | `test_runner` | Production, Debugging | Medium (4) | Automated test suite execution (vitest/jest/pytest) |
+| 5 | `linter` | Production, Debugging | Low (1) | Static analysis & code style check (ESLint / Ruff) |
+| 6 | `git_ops` | Production, Deployment | High (8) | Git operations: status, diff, local branching, and commit |
+| 7 | `log_query` | Debugging | Low (0) | High-speed regex filtering on logs and execution history |
+| 8 | `bug_reproduction` | Debugging | Medium (4) | Automatic generation of minimal repro scripts |
+| 9 | `deploy_api` | Deployment | High (9) | Target platform deployment trigger (Vercel/Fly.io/Webhook) |
+| 10 | `ci_trigger` | Deployment | High (8) | Dispatches & monitors CI pipeline runs (GitHub Actions) |
+| 11 | `infra_provision` | Deployment | High (9) | Manages environment infrastructure (`docker compose up/down`) |
+| 12 | `health_check` | Deployment, Monitor | Low (0) | Service ping, HTTP latency & status code monitor |
+| 13 | `security_scan` | Production, Debugging | Medium (3) | Secret pattern detection & static vulnerability scanner |
+| 14 | `diagram_gen` | Production | Low (2) | Editorial architecture diagrams (SVG & Mermaid) in `docs/architecture/` |
+| 15 | `doc_search` | Production, Debugging | Low (0) | Live documentation & npm package registry reference lookup |
+| 16 | `universal_tool_adapter` | All Teams | Medium (5) | Standard JSON-schema tool execution protocol adapter |
 
-### 4. Human-in-the-Loop Safeguards
-- **Gate 1: Ticket Approval:** Humans review and prioritize triaged tickets before fixes are initiated.
-- **Gate 2: Diff / PR Sign-Off:** Humans review code diffs, reviewer council notes, and test coverage before changes are pushed to remote branches.
+### 4. Autonomous Issue Resolver Pipeline
+- **End-to-End Orchestration (`IssueResolverPipeline`):**
+  1. **Intake & Triage:** Ingests issue descriptions, extracts affected components, and classifies task intent.
+  2. **Tiered Memory & Outline Retrieval:** Loads relevant rules, past rejection episodes, and structural code signatures.
+  3. **Supervised Delegation:** Manager assigns sub-tasks to functional teams.
+  4. **Multi-Gate Verification:** Runs test suites, static analysis, and security vulnerability scans.
+  5. **Review & Telemetry:** Records salience-filtered outcomes and outputs structured execution traces.
 
----
-
-## 📁 Repository Structure
-
-```
-AI-Dev-Team/
-├── apps/
-│   ├── api/                   # Fastify backend (REST & real-time WebSocket)
-│   └── dashboard/             # React + Tailwind review dashboard
-├── packages/
-│   ├── agents/                # Core agents, Team delegation & MemoryAgent
-│   │   └── src/
-│   │       ├── teams/         # Manager, TeamAgent & 12-Skill Registry
-│   │       ├── memory-agent.ts# Zero-database procedural & episodic memory
-│   │       ├── fixer.ts       # Surgical diff generator
-│   │       ├── reviewer.ts    # Single & council peer reviewer
-│   │       └── sandbox.ts     # Sandboxed container executor
-│   ├── db/                    # Prisma client & data models
-│   ├── dependency-graph/      # AST dependency graph parser & traversal
-│   ├── llm-gateway/           # Multi-provider LLM client with Zod validation
-│   └── scan-cache/            # Content-hashing & impacted-set calculation
-├── .aidev/                    # Local/repo agent memory (rules.md, episodes.jsonl)
-├── prompts/                   # Versioned prompt templates
-└── docker-compose.yml         # Containerized infrastructure (optional)
-```
+### 5. Execution Telemetry & Workflow Visualizer
+- **Telemetry Visualizer (`TelemetryVisualizer`):** Formats execution graph states (nodes, transitions, durations, statuses) into structured JSON snapshots for dashboards and terminal ASCII trees.
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Prerequisites
-- **Node.js** v20+ (v23+ supported)
-- **npm** v9+
-- **Git**
+### Prerequisites
+- Node.js **>= 20.0.0** (Node 22 or 23 recommended)
+- Docker Desktop / Engine running locally (for isolated sandboxes)
+- Ollama running locally (`ollama serve`)
 
-### 2. Installation
+### Installation
+
 ```bash
+# 1. Clone repository
 git clone https://github.com/Tattvam21/AI-Dev-Team.git
 cd AI-Dev-Team
+
+# 2. Install dependencies
 npm install
+
+# 3. Pull default local models
+ollama pull qwen3-coder:30b
+ollama pull devstral:24b
 ```
 
-### 3. Environment Configuration
+### Running the Verification Suite
+
 ```bash
-cp .env.example .env
-```
-
-Set your model configuration in `.env`:
-```env
-# Cloud providers (Anthropic / OpenAI)
-ANTHROPIC_API_KEY=your-api-key-here
-
-# Local Ollama providers (Optional)
-OLLAMA_BASE_URL=http://localhost:11434
-FIXER_MODEL=qwen3-coder:30b
-REVIEWER_MODEL=devstral:24b
-TEAM_MODEL=qwen3-coder:30b
+node --experimental-strip-types packages/agents/test-all-enhancements.mjs
 ```
 
 ---
 
-## 💻 Programmatic Usage
+## 📖 Programmatic Usage
 
-### Dispatching Tasks via Multi-Team Delegation
+### Autonomous Issue Resolver
 
 ```typescript
-import { ManagerAgent, Task } from '@ai-dev-team/agents';
+import { IssueResolverPipeline } from '@ai-dev-team/agents';
 
-const manager = new ManagerAgent({ projectRoot: process.cwd() });
+const pipeline = new IssueResolverPipeline({ projectRoot: process.cwd() });
 
-const task: Task = {
-  taskId: 'task-auth-01',
-  assignedTeam: ManagerAgent.resolveTeam('fix token signature validation error'),
-  taskType: 'bugfix',
-  context: { targetFile: 'src/auth/jwt.ts' },
-  expectedOutput: 'Handle expired token edge cases gracefully',
-  maxIterations: 4,
+const result = await pipeline.resolveIssue({
+  issueId: '101',
+  title: 'Fix unhandled promise rejection in auth handler',
+  body: 'When JWT expires, request handler crashes without returning 401.',
+  targetFile: 'src/auth/jwt.ts',
+  labels: ['bug', 'auth']
+});
+
+console.log('Status:', result.status);
+console.log('Telemetry:\n', result.telemetry);
+```
+
+### Two-Loop Manager & Skill Registry
+
+```typescript
+import { ManagerAgent, SkillRegistry } from '@ai-dev-team/agents';
+
+const registry = new SkillRegistry();
+const manager = new ManagerAgent({ projectRoot: process.cwd(), skillRegistry: registry });
+
+const result = await manager.dispatch({
+  taskId: 'task-sec-1',
+  assignedTeam: 'debugging',
+  taskType: 'security',
+  expectedOutput: 'Scan repository for hardcoded secrets and unsafe eval patterns',
+  context: { targetFile: 'src/index.ts' },
   status: 'pending'
-};
-
-const result = await manager.dispatch(task);
-console.log(`Task status: ${result.status}, Iterations: ${result.iterationsUsed}`);
-```
-
-### Interacting with Zero-Postgres Memory
-
-```typescript
-import { MemoryAgent } from '@ai-dev-team/agents';
-
-const memory = new MemoryAgent(process.cwd());
-
-// Recall relevant rules and past rejection critiques
-const context = await memory.recall('src/auth/jwt.ts');
-console.log(context.formattedContext);
-
-// Append permanent architectural rules
-await memory.addRule('Always use crypto.randomUUID for nonces', 'Security');
-```
-
----
-
-## 🧪 Testing
-
-```bash
-# Run tests across workspaces
-npm run test
-
-# Run agents package test suite
-npm test --workspace=@ai-dev-team/agents
+});
 ```
 
 ---
 
 ## 📄 License
 
-MIT © 2026 AI Dev Team Authors and Contributors. See [LICENSE](LICENSE) for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+Copyright (c) 2026 AI Dev Team Authors and Contributors.

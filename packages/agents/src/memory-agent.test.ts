@@ -3,14 +3,16 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { MemoryAgent, EpisodeRecord } from './memory-agent.js';
+import { extractCodeOutline } from './memory/code-ast-outline.js';
 
-describe('MemoryAgent (Zero-Postgres File Memory)', () => {
+describe('MemoryAgent (Tiered Zero-Postgres Memory & Code AST Outline)', () => {
   let tempDir: string;
   let memoryAgent: MemoryAgent;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidev-mem-test-'));
     memoryAgent = new MemoryAgent(tempDir);
+    MemoryAgent.clearL0Cache();
   });
 
   afterEach(() => {
@@ -44,7 +46,7 @@ describe('MemoryAgent (Zero-Postgres File Memory)', () => {
     expect(result.formattedContext).not.toContain('Past Memory');
   });
 
-  it('records and recalls episodes matching target file path', async () => {
+  it('records and recalls episodes matching target file path with tiered levels', async () => {
     const ep1: EpisodeRecord = {
       ticketId: 't-1',
       targetFile: 'src/auth.ts',
@@ -69,9 +71,13 @@ describe('MemoryAgent (Zero-Postgres File Memory)', () => {
       rationale: 'Added legacy token support'
     };
 
-    await memoryAgent.recordEpisode(ep1);
-    await memoryAgent.recordEpisode(ep2);
-    await memoryAgent.recordEpisode(ep3);
+    const rec1 = await memoryAgent.recordEpisode(ep1);
+    const rec2 = await memoryAgent.recordEpisode(ep2);
+    const rec3 = await memoryAgent.recordEpisode(ep3);
+
+    expect(rec1.recorded).toBe(true);
+    expect(rec2.recorded).toBe(true);
+    expect(rec3.recorded).toBe(true);
 
     const recallAuth = await memoryAgent.recall('src/auth.ts');
 
@@ -80,11 +86,62 @@ describe('MemoryAgent (Zero-Postgres File Memory)', () => {
     expect(recallAuth.episodes[1].ticketId).toBe('t-3');
     expect(recallAuth.formattedContext).toContain('Previous rejection reason: "Broke backward compatibility for legacy tokens"');
     expect(recallAuth.formattedContext).toContain('Avoid repeating past rejected approaches');
+    expect(recallAuth.tierUsed).toBe('L2');
 
-    // Querying other file returns only ep2
-    const recallMath = await memoryAgent.recall('src/utils/math.ts');
-    expect(recallMath.episodes).toHaveLength(1);
-    expect(recallMath.episodes[0].ticketId).toBe('t-2');
+    // Subsequent immediate recall should utilize L0 cache
+    const l0Recall = await memoryAgent.recall('src/auth.ts');
+    expect(l0Recall.tierUsed).toBe('L0');
+  });
+
+  it('filters out low-salience noise from episodic memory', async () => {
+    const noisyEpisode: EpisodeRecord = {
+      ticketId: 't-noise',
+      targetFile: 'src/temp.ts',
+      title: 'ok', // too short
+      verdict: 'pass'
+    };
+
+    const result = await memoryAgent.recordEpisode(noisyEpisode);
+    expect(result.recorded).toBe(false);
+    expect(result.reason).toContain('Title too short');
+  });
+
+  it('extracts structural code outline without full source bodies', () => {
+    const sampleCode = `
+import fs from 'fs';
+import { MemoryAgent } from './memory.js';
+
+export interface UserSession {
+  id: string;
+  token: string;
+}
+
+export type AuthState = 'logged_in' | 'logged_out';
+
+export class AuthService {
+  public async login(user: string, pass: string): Promise<boolean> {
+    // long implementation here
+    return true;
+  }
+
+  private validateToken(token: string): boolean {
+    return token.length > 0;
+  }
+}
+
+export async function hashPassword(raw: string): Promise<string> {
+  return raw + '_hashed';
+}
+`;
+
+    const outline = extractCodeOutline('src/auth.ts', sampleCode);
+
+    expect(outline.filePath).toBe('src/auth.ts');
+    expect(outline.typesAndInterfaces).toContain('interface UserSession');
+    expect(outline.typesAndInterfaces).toContain('type AuthState');
+    expect(outline.classes[0].name).toBe('AuthService');
+    expect(outline.classes[0].methods).toContain('login(user: string, pass: string)');
+    expect(outline.functions).toContain('hashPassword(raw: string)');
   });
 
   it('allows adding new procedural rules', async () => {

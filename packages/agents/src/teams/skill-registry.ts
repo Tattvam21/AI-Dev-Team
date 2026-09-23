@@ -1,10 +1,13 @@
 import fs from 'fs';
 import path from 'path';
-import { TeamName } from './task-schemas.js';
-import { MemoryAgent } from '../memory-agent.js';
-import { executeInSandbox } from '../sandbox.js';
-import { runStaticAnalysis } from '../static-analysis.js';
-import { createGitWorktree } from '../git-worktree.js';
+import { type TeamName, type RiskLevel } from './task-schemas.ts';
+import { MemoryAgent } from '../memory-agent.ts';
+import { executeInSandbox } from '../sandbox.ts';
+import { runStaticAnalysis } from '../static-analysis.ts';
+import { runSecurityScan } from '../security/security-scanner.ts';
+import { DiagramGenerator } from '../visual/diagram-generator.ts';
+import { DocSearchClient } from '../tools/doc-search-client.ts';
+import { UniversalToolProtocolAdapter } from '../tools/tool-protocol-adapter.ts';
 import { simpleGit } from 'simple-git';
 
 export type SkillCallable = (args: Record<string, any>, context: Record<string, any>) => Promise<any>;
@@ -13,11 +16,14 @@ export interface RegisteredSkill {
   name: string;
   description: string;
   allowedTeams: TeamName[];
+  riskLevel: RiskLevel;
+  riskScore: number; // 0-10
   execute: SkillCallable;
 }
 
 export class SkillRegistry {
   private skills = new Map<string, RegisteredSkill>();
+  private universalAdapter = new UniversalToolProtocolAdapter();
 
   constructor() {
     this.registerDefaultSkills();
@@ -29,6 +35,10 @@ export class SkillRegistry {
 
   public get(name: string): RegisteredSkill | undefined {
     return this.skills.get(name);
+  }
+
+  public getUniversalAdapter(): UniversalToolProtocolAdapter {
+    return this.universalAdapter;
   }
 
   public getAvailableSkills(team: TeamName): RegisteredSkill[] {
@@ -50,33 +60,39 @@ export class SkillRegistry {
     // 1. memory_recall: Access procedural rules & episodic history from .aidev/
     this.register({
       name: 'memory_recall',
-      description: 'Recalls rules and past ticket episodes for a given file or topic from .aidev/',
+      description: 'Recalls rules, code outlines, and past ticket episodes for a given file or topic from .aidev/',
       allowedTeams: ['production', 'debugging', 'deployment'],
+      riskLevel: 'low',
+      riskScore: 0,
       execute: async (args, context) => {
         const projectRoot = context.projectRoot || process.cwd();
         const targetFile = args.targetFile || '';
         const memory = new MemoryAgent(projectRoot);
-        return await memory.recall(targetFile);
+        return await memory.recall(targetFile, {
+          includeOutline: args.includeOutline ?? true
+        });
       }
     });
 
     // 2. memory_record: Records a completed episode into .aidev/
     this.register({
       name: 'memory_record',
-      description: 'Records a completed task or review episode into .aidev/episodes.jsonl',
+      description: 'Records a completed task or review episode into .aidev/episodes.jsonl with salience evaluation',
       allowedTeams: ['production', 'debugging', 'deployment'],
+      riskLevel: 'low',
+      riskScore: 1,
       execute: async (args, context) => {
         const projectRoot = context.projectRoot || process.cwd();
         const memory = new MemoryAgent(projectRoot);
-        await memory.recordEpisode({
+        return await memory.recordEpisode({
           ticketId: args.ticketId || context.taskId || 'generic-task',
           targetFile: args.targetFile || 'system',
           title: args.title || 'Task completion',
           verdict: args.verdict || 'pass',
           rationale: args.rationale,
-          reviewerNotes: args.reviewerNotes
+          reviewerNotes: args.reviewerNotes,
+          diffSummary: args.diffSummary
         });
-        return { recorded: true };
       }
     });
 
@@ -85,6 +101,8 @@ export class SkillRegistry {
       name: 'code_exec',
       description: 'Executes code or terminal commands safely inside the sandbox container',
       allowedTeams: ['production', 'debugging'],
+      riskLevel: 'medium',
+      riskScore: 5,
       execute: async (args, context) => {
         const worktreePath = context.worktreePath || process.cwd();
         const command = args.command;
@@ -100,6 +118,8 @@ export class SkillRegistry {
       name: 'test_runner',
       description: 'Runs test suite (vitest/jest/pytest) and returns pass/fail and logs',
       allowedTeams: ['production', 'debugging'],
+      riskLevel: 'medium',
+      riskScore: 4,
       execute: async (args, context) => {
         const worktreePath = context.worktreePath || process.cwd();
         const cmd = args.testCommand || 'npm test';
@@ -114,6 +134,8 @@ export class SkillRegistry {
       name: 'linter',
       description: 'Performs static analysis & lint checks (ESLint / Ruff) on the workspace',
       allowedTeams: ['production', 'debugging'],
+      riskLevel: 'low',
+      riskScore: 1,
       execute: async (args, context) => {
         const targetDir = context.worktreePath || context.projectRoot || process.cwd();
         const files = args.files || [];
@@ -126,6 +148,8 @@ export class SkillRegistry {
       name: 'git_ops',
       description: 'Performs git repository operations (status, diff, branch, commit)',
       allowedTeams: ['production', 'deployment'],
+      riskLevel: 'high',
+      riskScore: 8,
       execute: async (args, context) => {
         const targetDir = context.worktreePath || context.projectRoot || process.cwd();
         const git = simpleGit(targetDir);
@@ -153,6 +177,8 @@ export class SkillRegistry {
       name: 'log_query',
       description: 'Searches and filters application, execution, or CI logs for error patterns',
       allowedTeams: ['debugging'],
+      riskLevel: 'low',
+      riskScore: 0,
       execute: async (args, context) => {
         const logFile = args.logFile || context.logFile;
         const pattern = args.pattern || 'error|fail|exception';
@@ -168,7 +194,6 @@ export class SkillRegistry {
           };
         }
 
-        // Search recent logs in execution history
         const executionHistory = args.history || context.history || [];
         const matches = executionHistory.filter((item: any) =>
           regex.test(typeof item === 'string' ? item : JSON.stringify(item))
@@ -185,6 +210,8 @@ export class SkillRegistry {
       name: 'bug_reproduction',
       description: 'Creates a minimal reproduction script from a stack trace and asserts failure',
       allowedTeams: ['debugging'],
+      riskLevel: 'medium',
+      riskScore: 4,
       execute: async (args, context) => {
         const worktreePath = context.worktreePath || process.cwd();
         const reproCode = args.reproCode;
@@ -217,6 +244,8 @@ export class SkillRegistry {
       name: 'deploy_api',
       description: 'Triggers a deployment to the target platform (Vercel/Fly.io/Webhook)',
       allowedTeams: ['deployment'],
+      riskLevel: 'high',
+      riskScore: 9,
       execute: async (args, context) => {
         const endpoint = args.deployWebhookUrl || process.env.DEPLOY_WEBHOOK_URL;
         if (!endpoint) {
@@ -250,6 +279,8 @@ export class SkillRegistry {
       name: 'ci_trigger',
       description: 'Kicks off or polls CI pipeline runs (GitHub Actions / GitLab CI)',
       allowedTeams: ['deployment'],
+      riskLevel: 'high',
+      riskScore: 8,
       execute: async (args, context) => {
         const repo = args.repo || process.env.GITHUB_REPOSITORY;
         const workflowId = args.workflowId || 'ci.yml';
@@ -270,6 +301,8 @@ export class SkillRegistry {
       name: 'infra_provision',
       description: 'Provisions or deprovisions environment infrastructure (Docker Compose/Terraform)',
       allowedTeams: ['deployment'],
+      riskLevel: 'high',
+      riskScore: 9,
       execute: async (args, context) => {
         const action = args.action || 'up';
         const projectRoot = context.projectRoot || process.cwd();
@@ -289,6 +322,8 @@ export class SkillRegistry {
       name: 'health_check',
       description: 'Pings deployed service or local endpoint and measures response latency & status code',
       allowedTeams: ['deployment'],
+      riskLevel: 'low',
+      riskScore: 0,
       execute: async (args, context) => {
         const url = args.url || process.env.HEALTH_CHECK_URL || 'http://localhost:3000/health';
         const startTime = Date.now();
@@ -317,6 +352,71 @@ export class SkillRegistry {
         }
       }
     });
+
+    // 13. security_scan: Scans for secrets and security vulnerabilities
+    this.register({
+      name: 'security_scan',
+      description: 'Scans target files or workspace for hardcoded secrets and security vulnerability patterns',
+      allowedTeams: ['debugging', 'production'],
+      riskLevel: 'medium',
+      riskScore: 3,
+      execute: async (args, context) => {
+        const targetDir = context.worktreePath || context.projectRoot || process.cwd();
+        const files = args.files || [];
+        return await runSecurityScan(targetDir, files);
+      }
+    });
+
+    // 14. diagram_gen: Generates architecture diagrams
+    this.register({
+      name: 'diagram_gen',
+      description: 'Generates editorial SVG and Mermaid architectural diagrams into docs/architecture/',
+      allowedTeams: ['production'],
+      riskLevel: 'low',
+      riskScore: 2,
+      execute: async (args, context) => {
+        const projectRoot = context.projectRoot || process.cwd();
+        const generator = new DiagramGenerator(projectRoot);
+        const fileName = args.fileName || 'architecture_diagram.svg';
+        const spec = args.spec || {
+          title: args.title || 'System Architecture',
+          description: args.description || 'Auto-generated component graph',
+          nodes: args.nodes || [{ id: 'app', label: 'App Core', type: 'service' }],
+          edges: args.edges || []
+        };
+        return await generator.saveDiagram(fileName, spec);
+      }
+    });
+
+    // 15. doc_search: Queries API documentation and package references
+    this.register({
+      name: 'doc_search',
+      description: 'Retrieves technical documentation, package registry references, and API specs',
+      allowedTeams: ['production', 'debugging'],
+      riskLevel: 'low',
+      riskScore: 0,
+      execute: async (args) => {
+        const client = new DocSearchClient();
+        return await client.search({
+          query: args.query || '',
+          targetPackage: args.targetPackage,
+          limit: args.limit || 5
+        });
+      }
+    });
+
+    // 16. universal_tool_adapter: Dynamically invokes standard tool schema definitions
+    this.register({
+      name: 'universal_tool_adapter',
+      description: 'Executes dynamically registered standard JSON-schema tool definitions',
+      allowedTeams: ['production', 'debugging', 'deployment'],
+      riskLevel: 'medium',
+      riskScore: 5,
+      execute: async (args, context) => {
+        const toolName = args.toolName;
+        const toolParams = args.params || {};
+        return await this.universalAdapter.executeTool(toolName, toolParams, context);
+      }
+    });
   }
 }
-

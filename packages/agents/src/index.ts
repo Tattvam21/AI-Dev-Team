@@ -8,7 +8,15 @@ export * from './test-writer.js';
 export * from './reviewer.js';
 export * from './git-sync.js';
 export * from './memory-agent.js';
+export * from './memory/code-ast-outline.js';
+export * from './security/security-scanner.js';
+export * from './visual/diagram-generator.js';
+export * from './tools/doc-search-client.js';
+export * from './tools/tool-protocol-adapter.js';
+export * from './workflows/telemetry-visualizer.js';
+export * from './workflows/issue-resolver-pipeline.js';
 export * from './teams/index.js';
+
 export const AGENTS_MODULE = "agents";
 
 export type AgentRole = "scanner" | "triage" | "fixer" | "reviewer" | "test-writer" | "git-sync";

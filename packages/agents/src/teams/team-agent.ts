@@ -1,5 +1,5 @@
-import { Task, Result, TeamName, TeamDecision, TeamDecisionSchema } from './task-schemas.js';
-import { SkillRegistry } from './skill-registry.js';
+import { type Task, type Result, type TeamName, type TeamDecision, TeamDecisionSchema } from './task-schemas.ts';
+import { SkillRegistry } from './skill-registry.ts';
 import { generateStructured } from '@ai-dev-team/llm-gateway';
 
 export interface TeamExecutionState {

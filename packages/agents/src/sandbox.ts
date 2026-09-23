@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
-import { prisma as defaultPrisma, PrismaClient, TestRun } from '@ai-dev-team/db';
-import { createGitWorktree } from './git-worktree.js';
+import { prisma as defaultPrisma, type PrismaClient, type TestRun } from '@ai-dev-team/db';
+import { createGitWorktree } from './git-worktree.ts';
 
 export interface SandboxEnvironment {
   image: string;
